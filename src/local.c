@@ -1448,6 +1448,7 @@ main(int argc, char **argv)
 
     char *plugin      = NULL;
     char *plugin_opts = NULL;
+    int   plugin_mode = TCP_ONLY;
     char *plugin_host = NULL;
     char *plugin_port = NULL;
     char tmp_port[8];
@@ -1474,6 +1475,7 @@ main(int argc, char **argv)
         { "mptcp",       no_argument,       NULL, GETOPT_VAL_MPTCP       },
         { "plugin",      required_argument, NULL, GETOPT_VAL_PLUGIN      },
         { "plugin-opts", required_argument, NULL, GETOPT_VAL_PLUGIN_OPTS },
+        { "plugin-mode", required_argument, NULL, GETOPT_VAL_PLUGIN_MODE },
         { "password",    required_argument, NULL, GETOPT_VAL_PASSWORD    },
         { "key",         required_argument, NULL, GETOPT_VAL_KEY         },
         { "server-url",  required_argument, NULL, GETOPT_VAL_SERVER_URL  },
@@ -1520,6 +1522,9 @@ main(int argc, char **argv)
             break;
         case GETOPT_VAL_PLUGIN_OPTS:
             plugin_opts = optarg;
+            break;
+        case GETOPT_VAL_PLUGIN_MODE:
+            plugin_mode = parse_plugin_mode(optarg);
             break;
         case GETOPT_VAL_KEY:
             key = optarg;
@@ -1697,6 +1702,9 @@ main(int argc, char **argv)
         if (plugin_opts == NULL) {
             plugin_opts = conf->plugin_opts;
         }
+        if (plugin_mode == TCP_ONLY) {
+            plugin_mode = conf->plugin_mode;
+        }
         if (reuse_port == 0) {
             reuse_port = conf->reuse_port;
         }
@@ -1797,7 +1805,11 @@ main(int argc, char **argv)
     }
 
     if (plugin != NULL) {
-        uint16_t port = get_local_port();
+        if (plugin_mode == UDP_ONLY && mode == TCP_AND_UDP) {
+            FATAL("plugin_mode cannot be 'udp_only' when both TCP and UDP relay are enabled");
+        }
+        int with_udp = mode != TCP_ONLY && plugin_mode != TCP_ONLY;
+        uint16_t port = get_local_port(with_udp);
         if (port == 0) {
             FATAL("failed to find a free port");
         }
@@ -1811,7 +1823,7 @@ main(int argc, char **argv)
 
 #ifdef __MINGW32__
         memset(&plugin_watcher, 0, sizeof(plugin_watcher));
-        plugin_watcher.port = get_local_port();
+        plugin_watcher.port = get_local_port(0);
         if (plugin_watcher.port == 0) {
             LOGE("failed to assign a control port for plugin");
         }
@@ -1909,6 +1921,9 @@ main(int argc, char **argv)
 #endif
 
     if (plugin != NULL) {
+        if (plugin_mode == UDP_ONLY && mode == TCP_AND_UDP) {
+            FATAL("plugin_mode cannot be udp_only when both TCP and UDP relay are enabled");
+        }
         int len          = 0;
         size_t buf_size  = 256 * remote_num;
         char *remote_str = ss_malloc(buf_size);
@@ -1919,12 +1934,14 @@ main(int argc, char **argv)
             snprintf(remote_str + len, buf_size - len, "|%s", remote_addr[i].host);
             len = strlen(remote_str);
         }
+        // according to SIP003u, the plugin does not need to know the plugin_mode
+        // it can always listen on both TCP and UDP ports
         int err = start_plugin(plugin, plugin_opts, remote_str,
                                remote_port, plugin_host, plugin_port,
 #ifdef __MINGW32__
                                plugin_watcher.port,
 #endif
-                               MODE_CLIENT);
+                               ROLE_CLIENT);
         if (err) {
             ERROR("start_plugin");
             FATAL("failed to start the plugin");
@@ -2015,6 +2032,10 @@ main(int argc, char **argv)
         LOGI("udprelay enabled");
         char *host                       = remote_addr[0].host;
         char *port                       = remote_addr[0].port == NULL ? remote_port : remote_addr[0].port;
+        if (plugin != NULL && plugin_mode != TCP_ONLY) {
+            host = plugin_host;
+            port = plugin_port;
+        }
         struct sockaddr_storage *storage = ss_malloc(sizeof(struct sockaddr_storage));
         memset(storage, 0, sizeof(struct sockaddr_storage));
         if (get_sockaddr(host, port, storage, 1, ipv6first) == -1) {
