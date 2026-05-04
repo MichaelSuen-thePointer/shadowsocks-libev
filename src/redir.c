@@ -1176,8 +1176,8 @@ main(int argc, char **argv)
     }
 
     if (plugin != NULL) {
-        if (plugin_mode == UDP_ONLY && mode == TCP_AND_UDP) {
-            FATAL("plugin_mode cannot be 'udp_only' when both TCP and UDP relay are enabled");
+        if (plugin_mode == UDP_ONLY && mode != UDP_ONLY) {
+            FATAL("plugin_mode 'udp_only' requires UDP-only relay mode");
         }
         int with_udp = mode != TCP_ONLY && plugin_mode != TCP_ONLY;
         uint16_t port = get_local_port(with_udp);
