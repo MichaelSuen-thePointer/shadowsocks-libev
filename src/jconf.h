@@ -43,6 +43,25 @@
 #define TCP_AND_UDP  1
 #define UDP_ONLY     3
 
+static inline int
+mode_has_tcp(int mode)
+{
+    return mode != UDP_ONLY;
+}
+
+static inline int
+mode_has_udp(int mode)
+{
+    return mode != TCP_ONLY;
+}
+
+static inline int
+plugin_mode_is_subset(int plugin_mode, int mode)
+{
+    return (!mode_has_tcp(plugin_mode) || mode_has_tcp(mode))
+           && (!mode_has_udp(plugin_mode) || mode_has_udp(mode));
+}
+
 typedef struct {
     char *port;
     char *password;

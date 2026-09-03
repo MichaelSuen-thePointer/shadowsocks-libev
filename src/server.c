@@ -2158,10 +2158,10 @@ main(int argc, char **argv)
 #endif
 
     if (plugin != NULL) {
-        if (plugin_mode == UDP_ONLY && mode != UDP_ONLY) {
-            FATAL("plugin_mode 'udp_only' requires UDP-only relay mode");
+        if (!plugin_mode_is_subset(plugin_mode, mode)) {
+            FATAL("plugin_mode must be a subset of mode");
         }
-        int with_udp = mode != TCP_ONLY && plugin_mode != TCP_ONLY;
+        int with_udp = mode_has_udp(mode) && mode_has_udp(plugin_mode);
         uint16_t port = get_local_port(with_udp);
         if (port == 0) {
             FATAL("failed to find a free port");
@@ -2314,7 +2314,6 @@ main(int argc, char **argv)
             len = strlen(server_str);
         }
         // according to SIP003u, the plugin does not need to know the plugin_mode
-        // it can always listen on both TCP and UDP ports
         int err = start_plugin(plugin, plugin_opts, server_str,
                                plugin_port, plugin_host, server_port,
 #ifdef __MINGW32__
@@ -2338,7 +2337,12 @@ main(int argc, char **argv)
             const char *port = server_addr[i].port ? server_addr[i].port : server_port;
 
             if (plugin != NULL) {
-                host = plugin_host;
+                if (mode_has_tcp(plugin_mode)) {
+                    host = plugin_host;
+                    port = server_port;
+                } else if (server_addr[i].port == NULL) {
+                    port = plugin_port;
+                }
             }
 
             if (host && ss_is_ipv6addr(host))
@@ -2371,7 +2375,7 @@ main(int argc, char **argv)
 
             num_listen_ctx++;
 
-            if (plugin != NULL)
+            if (plugin != NULL && mode_has_tcp(plugin_mode))
                 break;
         }
 
@@ -2392,14 +2396,13 @@ main(int argc, char **argv)
                 // i.e. the plugin acts as a server, listen to server_host:server_port
                 // and the server recvs from the plugin via 127.0.0.1:temp_port
 
-                // for udp relay, the plugin mode by default is TCP_ONLY, so the udp server should directly
-                // listen on the original server_host:server_port
-                if (plugin_mode == TCP_ONLY) {
+                // If the plugin does not handle UDP, ss-server listens on the original public port.
+                if (!mode_has_udp(plugin_mode)) {
                     port = plugin_port; // plugin_port is the original server_port
                 } else {
-                    // plugin_mode == TCP_AND_UDP or UDP_ONLY, the plugin handles UDP relay
-                    // so the server should listen on 127.0.0.1:temp_port
+                    // The plugin handles UDP, so ss-server receives from it on 127.0.0.1:temp_port.
                     host = plugin_host; // plugin_host is 127.0.0.1
+                    port = server_port;
                 }
             }
 
@@ -2412,6 +2415,9 @@ main(int argc, char **argv)
             if (err == -1)
                 continue;
             num_listen_ctx++;
+
+            if (plugin != NULL && mode_has_udp(plugin_mode))
+                break;
         }
 
         if (num_listen_ctx == 0) {

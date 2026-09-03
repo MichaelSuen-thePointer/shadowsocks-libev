@@ -1255,10 +1255,10 @@ main(int argc, char **argv)
     }
 
     if (plugin != NULL) {
-        if (plugin_mode == UDP_ONLY && mode != UDP_ONLY) {
-            FATAL("plugin_mode 'udp_only' requires UDP-only relay mode");
+        if (!plugin_mode_is_subset(plugin_mode, mode)) {
+            FATAL("plugin_mode must be a subset of mode");
         }
-        int with_udp = mode != TCP_ONLY && plugin_mode != TCP_ONLY;
+        int with_udp = mode_has_udp(mode) && mode_has_udp(plugin_mode);
         uint16_t port = get_local_port(with_udp);
         if (port == 0) {
             FATAL("failed to find a free port");
@@ -1388,7 +1388,6 @@ main(int argc, char **argv)
             len = strlen(remote_str);
         }
         // according to SIP003u, the plugin does not need to know the plugin_mode
-        // it can always listen on both TCP and UDP ports
         int err = start_plugin(plugin, plugin_opts, remote_str,
                                remote_port, plugin_host, plugin_port,
 #ifdef __MINGW32__
@@ -1432,7 +1431,7 @@ main(int argc, char **argv)
     for (i = 0; i < remote_num; i++) {
         char *host = remote_addr[i].host;
         char *port = remote_addr[i].port == NULL ? remote_port : remote_addr[i].port;
-        if (plugin != NULL) {
+        if (plugin != NULL && mode_has_tcp(plugin_mode)) {
             host = plugin_host;
             port = plugin_port;
         }
@@ -1443,7 +1442,7 @@ main(int argc, char **argv)
         }
         listen_ctx.remote_addr[i] = (struct sockaddr *)storage;
 
-        if (plugin != NULL)
+        if (plugin != NULL && mode_has_tcp(plugin_mode))
             break;
     }
     listen_ctx.timeout = timeout_secs;
@@ -1477,7 +1476,7 @@ main(int argc, char **argv)
         LOGI("UDP relay enabled");
         char *host                       = remote_addr[0].host;
         char *port                       = remote_addr[0].port == NULL ? remote_port : remote_addr[0].port;
-        if (plugin != NULL && plugin_mode != TCP_ONLY) {
+        if (plugin != NULL && mode_has_udp(plugin_mode)) {
             host = plugin_host;
             port = plugin_port;
         }
